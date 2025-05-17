@@ -116,7 +116,19 @@
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* 修复 CopilotKit 的 PoweredBy 标签样式，解决水合(hydration)错误 */
+.poweredBy {
+  visibility: visible !important;
+  display: block !important;
+  position: static !important;
+  text-align: center !important;
+  font-size: 12px !important;
+  padding: 3px 0 !important;
+  color: rgb(69, 69, 69) !important;
 }
