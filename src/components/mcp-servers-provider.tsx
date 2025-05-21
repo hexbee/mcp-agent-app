@@ -54,7 +54,7 @@ export function MCPServersProvider({ children }: MCPServersProviderProps) {
             return (
               <child.type
                 key={index}
-                {...child.props}
+                {...(child.props ?? {})}
                 mcpServers={mcpServers}
                 onAddServer={addServer}
                 onRemoveServer={removeServer}
@@ -72,7 +72,7 @@ export function MCPServersProvider({ children }: MCPServersProviderProps) {
     const child = children as React.ReactElement;
     return (
       <child.type
-        {...child.props}
+        {...(child.props ?? {})}
         mcpServers={mcpServers}
         onAddServer={addServer}
         onRemoveServer={removeServer}
