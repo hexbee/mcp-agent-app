@@ -1,10 +1,15 @@
 import { MCPTool, MCPClient as MCPClientInterface } from "@copilotkit/runtime";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 
 export interface McpClientOptions {
-  serverUrl: string;
+  serverUrl?: string;
+  command?: string;
+  args?: string[];
+  type?: "stdio" | "sse";
+  name?: string;
   headers?: Record<string, string>;
   onMessage?: (message: Record<string, unknown>) => void;
   onError?: (error: Error) => void;
@@ -25,21 +30,22 @@ export interface McpClientOptions {
  */
 export class MCPClient implements MCPClientInterface {
   private client: Client;
-  private transport: SSEClientTransport;
-  private serverUrl: URL;
+  private transport: any;
+  private serverUrl?: URL;
   private onMessage: (message: Record<string, unknown>) => void;
   private onError: (error: Error) => void;
   private onOpen: () => void;
   private onClose: () => void;
   private isConnected = false;
   private headers?: Record<string, string>;
+  private name?: string;
+  private command?: string;
+  private args?: string[];
 
   // Cache for tools to avoid repeated fetches
   private toolsCache: Record<string, MCPTool> | null = null;
 
   constructor(options: McpClientOptions) {
-    this.serverUrl = new URL(options.serverUrl);
-    this.headers = options.headers;
     this.onMessage =
       options.onMessage ||
       ((message) => console.log("Message received:", message));
@@ -47,17 +53,32 @@ export class MCPClient implements MCPClientInterface {
       options.onError || ((error) => console.error("Error:", error));
     this.onOpen = options.onOpen || (() => console.log("Connection opened"));
     this.onClose = options.onClose || (() => console.log("Connection closed"));
+    this.headers = options.headers;
+    this.name = options.name;
+    this.command = options.command;
+    this.args = options.args;
 
-    // Initialize the SSE transport with headers
-    this.transport = new SSEClientTransport(this.serverUrl, this.headers);
+    if (options.type === "stdio") {
+      if (!options.command) {
+        throw new Error("Stdio MCP server requires a command");
+      }
+      this.transport = new StdioClientTransport({
+        command: options.command,
+        args: options.args || [],
+      });
+    } else {
+      if (!options.serverUrl) {
+        throw new Error("SSE MCP server requires a serverUrl");
+      }
+      this.serverUrl = new URL(options.serverUrl);
+      this.transport = new SSEClientTransport(this.serverUrl, this.headers);
+    }
 
-    // Initialize the client
     this.client = new Client({
       name: "cpk-mcp-client",
       version: "0.0.1",
     });
 
-    // Set up event handlers
     this.transport.onmessage = this.handleMessage.bind(this);
     this.transport.onerror = this.handleError.bind(this);
     this.transport.onclose = this.handleClose.bind(this);
@@ -93,16 +114,21 @@ export class MCPClient implements MCPClientInterface {
    */
   public async connect(): Promise<void> {
     try {
-      console.log("Connecting to MCP server:", this.serverUrl.href);
-
+      if (this.serverUrl) {
+        console.log(`[${this.name ?? "unknown"}] Connecting to MCP server:`, this.serverUrl.href);
+      } else if (this.command) {
+        console.log(`[${this.name ?? "unknown"}] Connecting to MCP server (stdio):`, this.command, this.args);
+      } else {
+        console.log(`[${this.name ?? "unknown"}] Connecting to MCP server: unknown transport`);
+      }
       // Connect the client (which connects the transport)
       await this.client.connect(this.transport);
 
       this.isConnected = true;
-      console.log("Connected to MCP server");
+      console.log(`[${this.name ?? "unknown"}] Connected to MCP server`);
       this.onOpen();
     } catch (error) {
-      console.error("Failed to connect to MCP server:", error);
+      console.error(`[${this.name ?? "unknown"}] Failed to connect to MCP server:`, error);
       this.onError(error instanceof Error ? error : new Error(String(error)));
       throw error;
     }
@@ -318,7 +344,15 @@ export class MCPClient implements MCPClientInterface {
         return paramsObj;
       }
     }
-
+    // Handle single-nested params: { params: { actual data } }
+    if (
+      Object.keys(args).length === 1 &&
+      "params" in args &&
+      typeof args.params === "object"
+    ) {
+      console.log("Detected single-nested params, auto-unwrapping");
+      return args.params as Record<string, unknown>;
+    }
     return args;
   }
 

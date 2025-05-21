@@ -5,6 +5,7 @@ import {
 } from "@copilotkit/runtime";
 import { NextRequest } from "next/server";
 import { MCPClient } from "@/app/utils/mcp-client";
+import { ExtendedMCPEndpointConfig } from "@/types/mcp";
 
 import OpenAI from "openai";
 
@@ -20,11 +21,24 @@ const serviceAdapter = new OpenAIAdapter({
 
 const runtime = new CopilotRuntime({
   createMCPClient: async (config) => {
-    const mcpClient = new MCPClient({
-      serverUrl: config.endpoint,
-    });
-    await mcpClient.connect();
-    return mcpClient;
+    const extConfig = config as ExtendedMCPEndpointConfig;
+    if (extConfig.type === "stdio") {
+      const mcpClient = new MCPClient({
+        type: "stdio",
+        name: extConfig.name,
+        command: extConfig.command,
+        args: extConfig.arguments ? extConfig.arguments.split(' ') : [],
+      });
+      await mcpClient.connect();
+      return mcpClient;
+    } else {
+      const mcpClient = new MCPClient({
+        serverUrl: config.endpoint,
+        name: (config as any).name,
+      });
+      await mcpClient.connect();
+      return mcpClient;
+    }
   },
 });
 

@@ -1,24 +1,84 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import path from "path";
 
 import { useCopilotChat, useCopilotAction, CatchAllActionRenderProps } from "@copilotkit/react-core";
 import { CopilotKitCSSProperties, CopilotSidebar, useCopilotChatSuggestions } from "@copilotkit/react-ui";
 import { MCPEndpointConfig } from "@copilotkit/runtime";
+import { ExtendedMCPEndpointConfig } from "@/types/mcp";
 import { DefaultToolRender } from "@/components/default-tool-render";
+import { MCPServersButton } from "@/components/mcp-servers-button";
+// import { MCPServersProvider } from "@/components/mcp-servers-provider";
 
 const themeColor = "#6366f1";
+
+// Simple wrapper component for MCP Servers button
+function MCPServersWrapper() {
+  const { mcpServers, setMcpServers } = useCopilotChat();
+  const [initialized, setInitialized] = useState(false);
+
+  // 确保服务器列表被初始化
+  useEffect(() => {
+    if (!initialized && setMcpServers) {
+      // 初始化为空数组，避免undefined
+      setMcpServers([]);
+      setInitialized(true);
+    }
+  }, [mcpServers, setMcpServers, initialized]);
+
+  const addServer = (server: MCPEndpointConfig | ExtendedMCPEndpointConfig) => {
+    if (mcpServers) {
+      console.log("Adding server:", server);
+      setMcpServers([...mcpServers, server]);
+    } else {
+      console.log("Initializing with server:", server);
+      setMcpServers([server]);
+    }
+  };
+
+  const removeServer = (url: string) => {
+    if (mcpServers) {
+      console.log("Removing server with URL:", url);
+      console.log("Before removal:", mcpServers);
+      const updatedServers = mcpServers.filter((server) => server.endpoint !== url);
+      console.log("After removal:", updatedServers);
+      setMcpServers(updatedServers);
+    }
+  };
+
+  // 等待初始化完成
+  if (!mcpServers) return null;
+
+  return (
+    <MCPServersButton
+      mcpServers={mcpServers}
+      onAddServer={addServer}
+      onRemoveServer={removeServer}
+    />
+  );
+}
 
 export function ClientCopilotKitPage() {
   return (
     <main style={{ "--copilot-kit-primary-color": themeColor } as CopilotKitCSSProperties}>
+      {/* 顶部导航栏 */}
+      <div className="w-full flex items-center justify-between px-8 py-4 bg-white shadow z-10">
+        <div className="text-2xl font-bold text-indigo-600">MCP Agent App</div>
+        <div className="flex items-center gap-4">
+          {/* MCP Servers 按钮占位，后续可加更多按钮 */}
+          <MCPServersWrapper />
+          {/* 预留更多按钮位置 */}
+        </div>
+      </div>
+      {/* 主体内容 */}
       <YourMainContent />
       <CopilotSidebar
         clickOutsideToClose={false}
         defaultOpen={true}
         labels={{
           title: "Popup Assistant",
-          initial: "👋 Hi, there! You're chatting with an LLM that can use MCP servers.\n\n Since you scaffolded me with **CopilotKit**, you can ask me to use any MCP servers that you have set up on this page.\n\nIn your codebase, check out this page's code to see how it all works! You can also [checkout our documentation](https://docs.copilotkit.ai/guides/model-context-protocol) for any questions.\n\nNow, what can I do for you?"
+          initial: "👋 Hi, there! You're chatting with an LLM that can use MCP servers.\n\n Since you scaffolded me with **CopilotKit**, you can ask me to use any MCP servers that you have set up on this page.\n\nIn your codebase, check out this page's code to see how it all works! 你可以随时扩展更多功能！\n\nNow, what can I do for you?"
         }}
       />
     </main>
@@ -26,22 +86,42 @@ export function ClientCopilotKitPage() {
 }
 
 function YourMainContent() {
-  const { mcpServers, setMcpServers } = useCopilotChat();
-  const [newMcpServer, setNewMcpServer] = useState("");
+  // 文件系统相关状态
+  const [fileTree, setFileTree] = useState<{ name: string; isDir: boolean }[]>([]);
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [fileContent, setFileContent] = useState<string>("");
+  const [loading, setLoading] = useState(false);
 
+  // 获取文件树（只在有变更时刷新）
   useEffect(() => {
-    setMcpServers([
-      // Add any initial MCP servers here, find more at https://mcp.composio.dev or https://actions.zapier.com!
-    ]);
+    const fetchTree = () => {
+      fetch("/api/filesystem?op=list")
+        .then(res => res.json())
+        .then(data => setFileTree(data.files || []));
+    };
+    fetchTree();
+    // 监听 SSE
+    const es = new EventSource("/api/filesystem/subscribe");
+    es.addEventListener("change", () => {
+      fetchTree();
+    });
+    return () => es.close();
   }, []);
 
-  const removeMcpServer = (url: string) => {
-    setMcpServers(mcpServers.filter((server) => server.endpoint !== url));
-  }
+  // 读取文件内容
+  const handleFileClick = (filename: string) => {
+    setSelectedFile(filename);
+    setLoading(true);
+    fetch(`/api/filesystem?op=read&file=${encodeURIComponent(filename)}`)
+      .then(res => res.json())
+      .then(data => {
+        setFileContent(data.content || "(空文件)");
+        setLoading(false);
+      });
+  };
 
-  const addMcpServer = (server: MCPEndpointConfig) => {
-    setMcpServers([...mcpServers, server]);
-  }
+  // 获取全局状态，但只用于显示
+  const { mcpServers } = useCopilotChat();
 
   // 🪁 Copilot Suggestions: https://docs.copilotkit.ai/guides/copilot-suggestions
   useCopilotChatSuggestions({
@@ -68,40 +148,36 @@ function YourMainContent() {
   }
 
   return (
-    <div
-      style={{ backgroundColor: themeColor }}
-      className={classes.wrapper}
-    >
-      <div className={classes.container}>
-        <h1 className="text-4xl font-bold text-white mb-2 text-center">MCP Servers</h1>
-        <p className="text-gray-200 text-center">Discover more MCP servers at <a href="https://mcp.composio.dev" className="text-indigo-200">mcp.composio.dev.</a></p>
-        <hr className="border-white/20 my-6" />
-
-        <div className="flex flex-col gap-6">
-          {mcpServers.map((server, index) => (
-            <div key={index} className={classes.server}>
-              <p className="pr-8 truncate">{server.endpoint}</p>
-              <button className={classes.deleteButton} onClick={() => removeMcpServer(server.endpoint)}>
-                ✕
-              </button>
-            </div>
+    <div className="h-screen w-screen flex flex-row bg-gray-100">
+      {/* 文件树区域 */}
+      <div className="w-64 bg-white border-r h-full p-4 overflow-y-auto">
+        <h2 className="font-bold mb-4">文件系统 (filesystem)</h2>
+        <ul>
+          {fileTree.length === 0 && <li className="text-gray-400">(空目录)</li>}
+          {fileTree.map((item) => (
+            <li key={item.name} className="mb-2">
+              {item.isDir ? (
+                <span className="text-blue-600">📁 {item.name}</span>
+              ) : (
+                <button
+                  className={`text-left w-full ${selectedFile === item.name ? "font-bold text-indigo-600" : "text-gray-800"}`}
+                  onClick={() => handleFileClick(item.name)}
+                >
+                  📄 {item.name}
+                </button>
+              )}
+            </li>
           ))}
-          <input 
-            type="text" 
-            placeholder="Enter MCP server URL" 
-            className={classes.input} 
-            value={newMcpServer}
-            onChange={(e) => setNewMcpServer(e.target.value)}
-          />
-          <button className={classes.submitButton} onClick={() => {
-            if (newMcpServer) {
-              addMcpServer({ endpoint: newMcpServer });
-              setNewMcpServer("");
-            }
-          }} >
-            Add MCP Server
-          </button>
-        </div>
+        </ul>
+      </div>
+      {/* 文件内容区 */}
+      <div className="flex-1 p-8 overflow-auto">
+        <h2 className="font-bold mb-4">{selectedFile ? `文件内容：${selectedFile}` : "请选择左侧的文件"}</h2>
+        {loading ? (
+          <div className="text-gray-400">加载中...</div>
+        ) : (
+          <pre className="bg-gray-200 rounded p-4 whitespace-pre-wrap min-h-[200px]">{fileContent}</pre>
+        )}
       </div>
     </div>
   );
